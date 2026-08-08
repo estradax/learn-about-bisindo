@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { alphabet, getLetter } from "@/lib/alphabet";
+import PracticeModal from "@/components/practice-modal";
 
 export function generateStaticParams() {
   return alphabet.map((entry) => ({ letter: entry.letter }));
@@ -36,6 +37,7 @@ export default async function LetterPage(props: PageProps<"/belajar/[letter]">) 
       </div>
       <h1 className="font-heading text-3xl">Huruf {entry.letter}</h1>
       <p className="max-w-md text-lg text-foreground/80">{entry.tip}</p>
+      <PracticeModal letter={entry.letter} />
       <div className="mt-4 flex w-full justify-between">
         {prev ? (
           <Link

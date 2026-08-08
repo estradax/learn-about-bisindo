@@ -10,6 +10,7 @@ const IMAGE_SIZE = 224;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
 const PREDICT_INTERVAL_MS = 500;
+const FREEZE_DELAY_MS = 1200;
 const HAND_LANDMARKER_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const HAND_LANDMARKER_MODEL_URL =
@@ -24,7 +25,12 @@ function softmax(logits: Float32Array) {
   return exps.map((v) => v / sum);
 }
 
-export default function CameraPredictor() {
+type CameraPredictorProps = {
+  targetLetter?: string;
+  onCorrect?: () => void;
+};
+
+export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredictorProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<InferenceSession | null>(null);
@@ -34,6 +40,8 @@ export default function CameraPredictor() {
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [prediction, setPrediction] = useState<{ letter: string; confidence: number } | null>(null);
+  const [frozen, setFrozen] = useState(false);
+  const solvedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +119,8 @@ export default function CameraPredictor() {
       const handLandmarker = handLandmarkerRef.current;
       if (!video || !canvas || !session || !handLandmarker || classes.length === 0) return;
 
+      if (solvedRef.current) return;
+
       const handResult = handLandmarker.detectForVideo(video, performance.now());
       if (handResult.landmarks.length === 0) {
         setPrediction(null);
@@ -148,7 +158,18 @@ export default function CameraPredictor() {
       for (let i = 1; i < probs.length; i++) {
         if (probs[i] > probs[bestIdx]) bestIdx = i;
       }
-      setPrediction({ letter: classes[bestIdx], confidence: probs[bestIdx] });
+      const best = { letter: classes[bestIdx], confidence: probs[bestIdx] };
+      setPrediction(best);
+      if (
+        targetLetter &&
+        best.letter.toUpperCase() === targetLetter.toUpperCase() &&
+        best.confidence > 0.7
+      ) {
+        solvedRef.current = true;
+        video.pause();
+        setFrozen(true);
+        setTimeout(() => onCorrect?.(), FREEZE_DELAY_MS);
+      }
     }, PREDICT_INTERVAL_MS);
 
     return () => {
@@ -173,6 +194,13 @@ export default function CameraPredictor() {
             ) : (
               <p>{status === "loading" ? "Memuat model..." : "Menyalakan kamera..."}</p>
             )}
+          </div>
+        )}
+        {frozen && (
+          <div className="absolute inset-0 flex items-center justify-center bg-grass/30">
+            <div className="flex h-24 w-24 animate-ping-once items-center justify-center rounded-full bg-white/90 text-5xl shadow-lg">
+              ✅
+            </div>
           </div>
         )}
       </div>
