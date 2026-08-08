@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { InferenceSession, Tensor } from "onnxruntime-web";
+import type { InferenceSession, Tensor } from "onnxruntime-web/wasm";
+import type { HandLandmarker } from "@mediapipe/tasks-vision";
 
 const MODEL_URL = "/model/bisindo_large.onnx";
 const CLASSES_URL = "/model/bisindo_classes.json";
@@ -9,6 +10,10 @@ const IMAGE_SIZE = 224;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
 const PREDICT_INTERVAL_MS = 500;
+const HAND_LANDMARKER_WASM_URL =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const HAND_LANDMARKER_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 type Status = "loading" | "camera" | "ready" | "error";
 
@@ -24,6 +29,7 @@ export default function CameraPredictor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<InferenceSession | null>(null);
   const classesRef = useRef<string[]>([]);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
 
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
@@ -35,16 +41,26 @@ export default function CameraPredictor() {
 
     async function setup() {
       try {
-        const ort = await import("onnxruntime-web");
+        const ort = await import("onnxruntime-web/wasm");
         ort.env.wasm.wasmPaths = "/ort/";
 
-        const [session, classes] = await Promise.all([
+        const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+
+        const [session, classes, vision] = await Promise.all([
           ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] }),
           fetch(CLASSES_URL).then((res) => res.json() as Promise<string[]>),
+          FilesetResolver.forVisionTasks(HAND_LANDMARKER_WASM_URL),
         ]);
         if (cancelled) return;
         sessionRef.current = session;
         classesRef.current = classes;
+
+        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: HAND_LANDMARKER_MODEL_URL, delegate: "GPU" },
+          runningMode: "VIDEO",
+          numHands: 1,
+        });
+        if (cancelled) return;
 
         setStatus("camera");
         stream = await navigator.mediaDevices.getUserMedia({
@@ -77,6 +93,8 @@ export default function CameraPredictor() {
     return () => {
       cancelled = true;
       stream?.getTracks().forEach((t) => t.stop());
+      handLandmarkerRef.current?.close();
+      handLandmarkerRef.current = null;
     };
   }, []);
 
@@ -90,7 +108,14 @@ export default function CameraPredictor() {
       const canvas = canvasRef.current;
       const session = sessionRef.current;
       const classes = classesRef.current;
-      if (!video || !canvas || !session || classes.length === 0) return;
+      const handLandmarker = handLandmarkerRef.current;
+      if (!video || !canvas || !session || !handLandmarker || classes.length === 0) return;
+
+      const handResult = handLandmarker.detectForVideo(video, performance.now());
+      if (handResult.landmarks.length === 0) {
+        setPrediction(null);
+        return;
+      }
 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -112,7 +137,7 @@ export default function CameraPredictor() {
         chw[2 * planeSize + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
       }
 
-      const ort = await import("onnxruntime-web");
+      const ort = await import("onnxruntime-web/wasm");
       const tensor: Tensor = new ort.Tensor("float32", chw, [1, 3, IMAGE_SIZE, IMAGE_SIZE]);
       const outputs = await session.run({ input: tensor });
       if (cancelled) return;
@@ -162,7 +187,7 @@ export default function CameraPredictor() {
             </p>
           </div>
         ) : (
-          <p className="text-foreground/50">Peragakan huruf di depan kamera...</p>
+          <p className="text-foreground/50">Tunjukkan tanganmu di depan kamera...</p>
         )}
       </div>
     </div>
