@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { LetterEntry } from "@/lib/alphabet";
 
@@ -9,13 +10,21 @@ const colorClasses: Record<LetterEntry["color"], string> = {
   grape: "bg-grape/30 hover:bg-grape/50",
 };
 
-export default function LetterCard({ letter, color }: LetterEntry) {
+export default function LetterCard({ letter, color, image }: LetterEntry) {
   return (
     <Link
       href={`/belajar/${letter}`}
-      className={`flex aspect-square flex-col items-center justify-center rounded-3xl border-4 border-white shadow-md transition hover:scale-105 ${colorClasses[color]}`}
+      className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-3xl border-4 border-white p-2 shadow-md transition hover:scale-105 ${colorClasses[color]}`}
     >
-      <span className="font-heading text-5xl text-foreground">{letter}</span>
+      <div className="relative w-full flex-1">
+        <Image
+          src={image}
+          alt={`Simbol BISINDO huruf ${letter}`}
+          fill
+          sizes="(max-width: 768px) 25vw, 150px"
+          className="object-contain"
+        />
+      </div>
     </Link>
   );
 }

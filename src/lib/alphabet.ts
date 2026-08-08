@@ -2,6 +2,7 @@ export type LetterEntry = {
   letter: string;
   color: string;
   tip: string;
+  image: string;
 };
 
 const colors = ["sky", "sun", "grass", "berry", "grape"] as const;
@@ -12,6 +13,7 @@ export const alphabet: LetterEntry[] = Array.from({ length: 26 }, (_, i) => {
     letter,
     color: colors[i % colors.length],
     tip: `Begini cara membentuk huruf ${letter} dalam BISINDO.`,
+    image: `/bisindo/${letter}.png`,
   };
 });
 

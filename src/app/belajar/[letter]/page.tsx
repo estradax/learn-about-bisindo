@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { alphabet, getLetter } from "@/lib/alphabet";
@@ -23,8 +24,15 @@ export default async function LetterPage(props: PageProps<"/belajar/[letter]">) 
       <Link href="/belajar" className="self-start text-foreground/60 hover:text-berry">
         ← Kembali ke daftar huruf
       </Link>
-      <div className="flex h-56 w-56 items-center justify-center rounded-full border-8 border-sun bg-white shadow-lg">
-        <span className="font-heading text-8xl text-berry">{entry.letter}</span>
+      <div className="relative h-56 w-56 overflow-hidden rounded-full border-8 border-sun bg-white p-6 shadow-lg">
+        <Image
+          src={entry.image}
+          alt={`Simbol BISINDO huruf ${entry.letter}`}
+          fill
+          sizes="224px"
+          className="object-contain"
+          priority
+        />
       </div>
       <h1 className="font-heading text-3xl">Huruf {entry.letter}</h1>
       <p className="max-w-md text-lg text-foreground/80">{entry.tip}</p>
