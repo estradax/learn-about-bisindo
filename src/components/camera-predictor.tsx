@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { drawHandLandmarks } from "@/lib/draw-hand-landmarks";
 import { HandDetector } from "@/lib/hand-detector";
 import { createDefaultPredictor } from "@/lib/predictors";
 import type { Prediction, SignPredictor } from "@/lib/predictors/types";
@@ -25,6 +26,7 @@ export default function CameraPredictor({
 }: CameraPredictorProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const predictorRef = useRef<SignPredictor | null>(null);
   const handDetectorRef = useRef<HandDetector | null>(null);
 
@@ -32,6 +34,7 @@ export default function CameraPredictor({
   const [errorMessage, setErrorMessage] = useState("");
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [frozen, setFrozen] = useState(false);
+  const [showLandmarks, setShowLandmarks] = useState(false);
   const solvedRef = useRef(false);
 
   useEffect(() => {
@@ -101,6 +104,11 @@ export default function CameraPredictor({
       if (solvedRef.current) return;
 
       const handResult = handDetector.detect(video);
+
+      if (showLandmarks && overlayCanvasRef.current) {
+        drawHandLandmarks(overlayCanvasRef.current, handResult, video.videoWidth, video.videoHeight);
+      }
+
       if (!handResult || handResult.landmarks.length === 0) {
         setPrediction(null);
         return;
@@ -126,7 +134,14 @@ export default function CameraPredictor({
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [status, targetLetter, onCorrect]);
+  }, [status, targetLetter, onCorrect, showLandmarks]);
+
+  useEffect(() => {
+    if (showLandmarks) return;
+    const overlay = overlayCanvasRef.current;
+    const ctx = overlay?.getContext("2d");
+    ctx?.clearRect(0, 0, overlay?.width ?? 0, overlay?.height ?? 0);
+  }, [showLandmarks]);
 
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-4">
@@ -136,6 +151,10 @@ export default function CameraPredictor({
           className="h-full w-full -scale-x-100 object-cover"
           playsInline
           muted
+        />
+        <canvas
+          ref={overlayCanvasRef}
+          className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
         />
         {status !== "ready" && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white">
@@ -155,6 +174,14 @@ export default function CameraPredictor({
         )}
       </div>
       <canvas ref={canvasRef} className="hidden" />
+
+      <button
+        type="button"
+        onClick={() => setShowLandmarks((v) => !v)}
+        className="self-end rounded-full bg-white/70 px-3 py-1 text-xs text-foreground/70 shadow-inner"
+      >
+        {showLandmarks ? "Sembunyikan landmark" : "Tampilkan landmark"}
+      </button>
 
       <div className="flex h-24 w-full items-center justify-center rounded-2xl bg-white/70 shadow-inner">
         {prediction ? (
