@@ -1,17 +1,26 @@
+import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
+
 export type Prediction = {
   letter: string;
   confidence: number;
 };
 
+export type PredictorInput = {
+  video: HTMLVideoElement;
+  /** Scratch canvas for cropping/resizing, for predictors that need pixel input. */
+  canvas: HTMLCanvasElement;
+  /** Hand landmarks/handedness for the current frame, already computed for the hand-presence gate. */
+  handResult: HandLandmarkerResult | null;
+};
+
 /**
- * A sign-classification model that turns a square-cropped video frame into a
+ * A sign-classification model that turns the current camera frame into a
  * letter prediction. Implementations own their own model loading, input
  * preprocessing, and inference — swap in a new model by writing a new
  * SignPredictor rather than touching CameraPredictor.
  */
 export interface SignPredictor {
   load(): Promise<void>;
-  /** Runs inference on the current video frame. `canvas` is scratch space for cropping/resizing. */
-  predict(video: HTMLVideoElement, canvas: HTMLCanvasElement): Promise<Prediction | null>;
+  predict(input: PredictorInput): Promise<Prediction | null>;
   dispose(): void;
 }

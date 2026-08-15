@@ -1,5 +1,5 @@
 import type { InferenceSession, Tensor } from "onnxruntime-web/wasm";
-import type { Prediction, SignPredictor } from "./types";
+import type { Prediction, PredictorInput, SignPredictor } from "./types";
 
 const MODEL_URL = "/model/bisindo_large.onnx";
 const CLASSES_URL = "/model/bisindo_classes.json";
@@ -31,7 +31,7 @@ export class OnnxBisindoPredictor implements SignPredictor {
     this.classes = classes;
   }
 
-  async predict(video: HTMLVideoElement, canvas: HTMLCanvasElement): Promise<Prediction | null> {
+  async predict({ video, canvas }: PredictorInput): Promise<Prediction | null> {
     const session = this.session;
     if (!session || this.classes.length === 0) return null;
 

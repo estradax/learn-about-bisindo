@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HandDetector } from "@/lib/hand-detector";
-import { OnnxBisindoPredictor } from "@/lib/predictors/onnx-bisindo-predictor";
+import { createDefaultPredictor } from "@/lib/predictors";
 import type { Prediction, SignPredictor } from "@/lib/predictors/types";
 
 const PREDICT_INTERVAL_MS = 500;
@@ -14,14 +14,14 @@ type Status = "loading" | "camera" | "ready" | "error";
 type CameraPredictorProps = {
   targetLetter?: string;
   onCorrect?: () => void;
-  /** Swap in a different sign-classification model. Defaults to the BISINDO ONNX CNN. */
+  /** Swap in a different sign-classification model. Defaults to NEXT_PUBLIC_CLASSIFIER_MODEL (or the ONNX CNN). */
   predictorFactory?: () => SignPredictor;
 };
 
 export default function CameraPredictor({
   targetLetter,
   onCorrect,
-  predictorFactory = () => new OnnxBisindoPredictor(),
+  predictorFactory = createDefaultPredictor,
 }: CameraPredictorProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -100,12 +100,13 @@ export default function CameraPredictor({
 
       if (solvedRef.current) return;
 
-      if (!handDetector.hasHand(video)) {
+      const handResult = handDetector.detect(video);
+      if (!handResult || handResult.landmarks.length === 0) {
         setPrediction(null);
         return;
       }
 
-      const best = await predictor.predict(video, canvas);
+      const best = await predictor.predict({ video, canvas, handResult });
       if (cancelled || !best) return;
 
       setPrediction(best);
