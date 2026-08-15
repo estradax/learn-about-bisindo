@@ -51,7 +51,12 @@ function buildFeatureVector(
   const vec = new Float32Array(2 * NUM_LANDMARKS * 3);
   handResult.landmarks.forEach((landmarks, i) => {
     const label = handResult.handedness[i]?.[0]?.categoryName;
-    const slot = label === "Left" ? 1 : 0;
+    // MediaPipe's handedness assumes a mirrored (selfie) input image, but
+    // `video` here is the raw, unmirrored camera frame (the on-screen
+    // mirroring is CSS-only), so its Left/Right labels come out flipped
+    // relative to the non-mirrored training images extract_landmarks.py
+    // used. Swap the slot to match.
+    const slot = label === "Left" ? 0 : 1;
     vec.set(normalizeHand(landmarks, width, height), slot * NUM_LANDMARKS * 3);
   });
   return vec;
