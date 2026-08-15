@@ -1,45 +1,36 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { InferenceSession, Tensor } from "onnxruntime-web/wasm";
-import type { HandLandmarker } from "@mediapipe/tasks-vision";
+import { HandDetector } from "@/lib/hand-detector";
+import { OnnxBisindoPredictor } from "@/lib/predictors/onnx-bisindo-predictor";
+import type { Prediction, SignPredictor } from "@/lib/predictors/types";
 
-const MODEL_URL = "/model/bisindo_large.onnx";
-const CLASSES_URL = "/model/bisindo_classes.json";
-const IMAGE_SIZE = 224;
-const IMAGENET_MEAN = [0.485, 0.456, 0.406];
-const IMAGENET_STD = [0.229, 0.224, 0.225];
 const PREDICT_INTERVAL_MS = 500;
 const FREEZE_DELAY_MS = 1200;
-const HAND_LANDMARKER_WASM_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const HAND_LANDMARKER_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const CONFIDENCE_THRESHOLD = 0.7;
 
 type Status = "loading" | "camera" | "ready" | "error";
-
-function softmax(logits: Float32Array) {
-  const max = Math.max(...logits);
-  const exps = logits.map((v) => Math.exp(v - max));
-  const sum = exps.reduce((a, b) => a + b, 0);
-  return exps.map((v) => v / sum);
-}
 
 type CameraPredictorProps = {
   targetLetter?: string;
   onCorrect?: () => void;
+  /** Swap in a different sign-classification model. Defaults to the BISINDO ONNX CNN. */
+  predictorFactory?: () => SignPredictor;
 };
 
-export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredictorProps = {}) {
+export default function CameraPredictor({
+  targetLetter,
+  onCorrect,
+  predictorFactory = () => new OnnxBisindoPredictor(),
+}: CameraPredictorProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sessionRef = useRef<InferenceSession | null>(null);
-  const classesRef = useRef<string[]>([]);
-  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const predictorRef = useRef<SignPredictor | null>(null);
+  const handDetectorRef = useRef<HandDetector | null>(null);
 
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
-  const [prediction, setPrediction] = useState<{ letter: string; confidence: number } | null>(null);
+  const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [frozen, setFrozen] = useState(false);
   const solvedRef = useRef(false);
 
@@ -49,26 +40,13 @@ export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredi
 
     async function setup() {
       try {
-        const ort = await import("onnxruntime-web/wasm");
-        ort.env.wasm.wasmPaths = "/ort/";
+        const predictor = predictorFactory();
+        const handDetector = new HandDetector();
 
-        const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
-
-        const [session, classes, vision] = await Promise.all([
-          ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] }),
-          fetch(CLASSES_URL).then((res) => res.json() as Promise<string[]>),
-          FilesetResolver.forVisionTasks(HAND_LANDMARKER_WASM_URL),
-        ]);
+        await Promise.all([predictor.load(), handDetector.load()]);
         if (cancelled) return;
-        sessionRef.current = session;
-        classesRef.current = classes;
-
-        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: { modelAssetPath: HAND_LANDMARKER_MODEL_URL, delegate: "GPU" },
-          runningMode: "VIDEO",
-          numHands: 1,
-        });
-        if (cancelled) return;
+        predictorRef.current = predictor;
+        handDetectorRef.current = handDetector;
 
         setStatus("camera");
         stream = await navigator.mediaDevices.getUserMedia({
@@ -101,10 +79,12 @@ export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredi
     return () => {
       cancelled = true;
       stream?.getTracks().forEach((t) => t.stop());
-      handLandmarkerRef.current?.close();
-      handLandmarkerRef.current = null;
+      predictorRef.current?.dispose();
+      predictorRef.current = null;
+      handDetectorRef.current?.dispose();
+      handDetectorRef.current = null;
     };
-  }, []);
+  }, [predictorFactory]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -114,56 +94,25 @@ export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredi
     const intervalId = setInterval(async () => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      const session = sessionRef.current;
-      const classes = classesRef.current;
-      const handLandmarker = handLandmarkerRef.current;
-      if (!video || !canvas || !session || !handLandmarker || classes.length === 0) return;
+      const predictor = predictorRef.current;
+      const handDetector = handDetectorRef.current;
+      if (!video || !canvas || !predictor || !handDetector) return;
 
       if (solvedRef.current) return;
 
-      const handResult = handLandmarker.detectForVideo(video, performance.now());
-      if (handResult.landmarks.length === 0) {
+      if (!handDetector.hasHand(video)) {
         setPrediction(null);
         return;
       }
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      const best = await predictor.predict(video, canvas);
+      if (cancelled || !best) return;
 
-      const side = Math.min(video.videoWidth, video.videoHeight);
-      const sx = (video.videoWidth - side) / 2;
-      const sy = (video.videoHeight - side) / 2;
-      ctx.drawImage(video, sx, sy, side, side, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
-
-      const { data } = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
-      const chw = new Float32Array(3 * IMAGE_SIZE * IMAGE_SIZE);
-      const planeSize = IMAGE_SIZE * IMAGE_SIZE;
-      for (let i = 0; i < planeSize; i++) {
-        const r = data[i * 4] / 255;
-        const g = data[i * 4 + 1] / 255;
-        const b = data[i * 4 + 2] / 255;
-        chw[i] = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
-        chw[planeSize + i] = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
-        chw[2 * planeSize + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
-      }
-
-      const ort = await import("onnxruntime-web/wasm");
-      const tensor: Tensor = new ort.Tensor("float32", chw, [1, 3, IMAGE_SIZE, IMAGE_SIZE]);
-      const outputs = await session.run({ input: tensor });
-      if (cancelled) return;
-
-      const logits = outputs.logits.data as Float32Array;
-      const probs = softmax(logits);
-      let bestIdx = 0;
-      for (let i = 1; i < probs.length; i++) {
-        if (probs[i] > probs[bestIdx]) bestIdx = i;
-      }
-      const best = { letter: classes[bestIdx], confidence: probs[bestIdx] };
       setPrediction(best);
       if (
         targetLetter &&
         best.letter.toUpperCase() === targetLetter.toUpperCase() &&
-        best.confidence > 0.7
+        best.confidence > CONFIDENCE_THRESHOLD
       ) {
         solvedRef.current = true;
         video.pause();
@@ -176,7 +125,7 @@ export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredi
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [status]);
+  }, [status, targetLetter, onCorrect]);
 
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-4">
@@ -204,7 +153,7 @@ export default function CameraPredictor({ targetLetter, onCorrect }: CameraPredi
           </div>
         )}
       </div>
-      <canvas ref={canvasRef} width={IMAGE_SIZE} height={IMAGE_SIZE} className="hidden" />
+      <canvas ref={canvasRef} className="hidden" />
 
       <div className="flex h-24 w-full items-center justify-center rounded-2xl bg-white/70 shadow-inner">
         {prediction ? (
