@@ -35,6 +35,7 @@ export default function CameraPredictor({
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [frozen, setFrozen] = useState(false);
   const [showLandmarks, setShowLandmarks] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const solvedRef = useRef(false);
 
   useEffect(() => {
@@ -89,52 +90,90 @@ export default function CameraPredictor({
     };
   }, [predictorFactory]);
 
+  const runPrediction = async (cancelledRef: { current: boolean }) => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const predictor = predictorRef.current;
+    const handDetector = handDetectorRef.current;
+    if (!video || !canvas || !predictor || !handDetector) return;
+
+    if (solvedRef.current) return;
+
+    const handResult = handDetector.detect(video);
+
+    if (showLandmarks && overlayCanvasRef.current) {
+      drawHandLandmarks(overlayCanvasRef.current, handResult, video.videoWidth, video.videoHeight);
+    }
+
+    if (!handResult || handResult.landmarks.length === 0) {
+      setPrediction(null);
+      return;
+    }
+
+    const best = await predictor.predict({ video, canvas, handResult });
+    if (cancelledRef.current || !best) return;
+
+    setPrediction(best);
+    if (
+      targetLetter &&
+      best.letter.toUpperCase() === targetLetter.toUpperCase() &&
+      best.confidence > CONFIDENCE_THRESHOLD
+    ) {
+      solvedRef.current = true;
+      video.pause();
+      setFrozen(true);
+      setTimeout(() => onCorrect?.(), FREEZE_DELAY_MS);
+    }
+  };
+
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status !== "ready" || capturedImage) return;
 
-    let cancelled = false;
+    const cancelledRef = { current: false };
 
-    const intervalId = setInterval(async () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const predictor = predictorRef.current;
-      const handDetector = handDetectorRef.current;
-      if (!video || !canvas || !predictor || !handDetector) return;
-
-      if (solvedRef.current) return;
-
-      const handResult = handDetector.detect(video);
-
-      if (showLandmarks && overlayCanvasRef.current) {
-        drawHandLandmarks(overlayCanvasRef.current, handResult, video.videoWidth, video.videoHeight);
-      }
-
-      if (!handResult || handResult.landmarks.length === 0) {
-        setPrediction(null);
-        return;
-      }
-
-      const best = await predictor.predict({ video, canvas, handResult });
-      if (cancelled || !best) return;
-
-      setPrediction(best);
-      if (
-        targetLetter &&
-        best.letter.toUpperCase() === targetLetter.toUpperCase() &&
-        best.confidence > CONFIDENCE_THRESHOLD
-      ) {
-        solvedRef.current = true;
-        video.pause();
-        setFrozen(true);
-        setTimeout(() => onCorrect?.(), FREEZE_DELAY_MS);
-      }
+    const intervalId = setInterval(() => {
+      runPrediction(cancelledRef);
     }, PREDICT_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       clearInterval(intervalId);
     };
-  }, [status, targetLetter, onCorrect, showLandmarks]);
+  }, [status, targetLetter, onCorrect, showLandmarks, capturedImage]);
+
+  const handleManualCapture = async () => {
+    if (status !== "ready") return;
+
+    const video = videoRef.current;
+    const predictor = predictorRef.current;
+    const handDetector = handDetectorRef.current;
+    if (!video || !predictor || !handDetector) return;
+
+    const snapshotCanvas = document.createElement("canvas");
+    snapshotCanvas.width = video.videoWidth;
+    snapshotCanvas.height = video.videoHeight;
+    const ctx = snapshotCanvas.getContext("2d");
+    if (!ctx) return;
+    ctx.translate(snapshotCanvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+    setCapturedImage(snapshotCanvas.toDataURL("image/png"));
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handResult = handDetector.detect(video);
+    if (!handResult || handResult.landmarks.length === 0) {
+      setPrediction(null);
+      return;
+    }
+    const best = await predictor.predict({ video, canvas, handResult });
+    setPrediction(best ?? null);
+  };
+
+  const handleRetake = () => {
+    setCapturedImage(null);
+    setPrediction(null);
+  };
 
   useEffect(() => {
     if (showLandmarks) return;
@@ -151,10 +190,20 @@ export default function CameraPredictor({
           className="h-full w-full -scale-x-100 object-cover"
           playsInline
           muted
+          style={capturedImage ? { display: "none" } : undefined}
         />
+        {capturedImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={capturedImage}
+            alt="Gambar yang diambil"
+            className="h-full w-full object-cover"
+          />
+        )}
         <canvas
           ref={overlayCanvasRef}
           className="pointer-events-none absolute inset-0 h-full w-full -scale-x-100 object-cover"
+          style={capturedImage ? { display: "none" } : undefined}
         />
         {status !== "ready" && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white">
@@ -175,13 +224,34 @@ export default function CameraPredictor({
       </div>
       <canvas ref={canvasRef} className="hidden" />
 
-      <button
-        type="button"
-        onClick={() => setShowLandmarks((v) => !v)}
-        className="self-end rounded-full bg-white/70 px-3 py-1 text-xs text-foreground/70 shadow-inner"
-      >
-        {showLandmarks ? "Sembunyikan landmark" : "Tampilkan landmark"}
-      </button>
+      <div className="flex w-full items-center justify-between gap-2">
+        {capturedImage ? (
+          <button
+            type="button"
+            onClick={handleRetake}
+            className="rounded-full bg-grape px-4 py-2 text-sm font-semibold text-white shadow-inner"
+          >
+            🔄 Ambil Ulang
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleManualCapture}
+            disabled={status !== "ready"}
+            className="rounded-full bg-grape px-4 py-2 text-sm font-semibold text-white shadow-inner disabled:opacity-50"
+          >
+            📸 Ambil Gambar
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setShowLandmarks((v) => !v)}
+          className="rounded-full bg-white/70 px-3 py-1 text-xs text-foreground/70 shadow-inner"
+        >
+          {showLandmarks ? "Sembunyikan landmark" : "Tampilkan landmark"}
+        </button>
+      </div>
 
       <div className="flex h-24 w-full items-center justify-center rounded-2xl bg-white/70 shadow-inner">
         {prediction ? (
