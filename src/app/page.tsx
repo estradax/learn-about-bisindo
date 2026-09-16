@@ -27,10 +27,10 @@ export default function Home() {
       <span className="text-4xl">🤟🐻🌈</span>
       <div className="flex flex-col gap-1">
         <h1 className="max-w-2xl font-heading text-3xl text-berry sm:text-4xl">
-          Ayo Belajar BISINDO!
+          PEMBACA
         </h1>
         <p className="max-w-xl text-lg text-foreground/80">
-          Belajar abjad BISINDO A-Z lewat gambar seru!
+          Penerjemah Bisindo dengan Analisis Citra berbasis AI
         </p>
       </div>
 

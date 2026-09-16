@@ -14,8 +14,9 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Ayo Belajar BISINDO!",
-  description: "Belajar abjad BISINDO A-Z dengan cara yang seru dan interaktif.",
+  title: "PEMBACA",
+  description:
+    "PEMBACA — Penerjemah Bisindo dengan Analisis Citra berbasis AI. Belajar abjad BISINDO A-Z dan coba terjemahkan isyaratmu lewat kamera.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

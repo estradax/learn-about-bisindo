@@ -17,6 +17,9 @@ export default function Navbar() {
       className="fixed inset-x-0 bottom-0 z-10 border-t-4 border-foreground/10 bg-background/95 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 pt-1">
+        <span className="font-heading text-sm text-berry">PEMBACA</span>
+      </div>
       <div className="mx-auto flex max-w-5xl items-stretch justify-around">
         {items.map((item) => {
           const active =
